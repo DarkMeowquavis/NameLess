@@ -47,7 +47,7 @@ class MusicController(View):
 
     @discord.ui.button(emoji="<a:in_queue:1506194417667674227>", label="Queue", style=discord.ButtonStyle.gray, row=1)
     async def show_queue(self, interaction: discord.Interaction, button: Button):
-        await self.music_cog.queue(interaction)
+        await self.music_cog.show_queue(interaction)
 
 
 class Music(commands.Cog):
@@ -63,13 +63,12 @@ class Music(commands.Cog):
 
     @commands.command()
     async def play(self, ctx, *, query: str):
-        if not ctx.voice_client:
-            if ctx.author.voice:
-                await ctx.author.voice.channel.connect()
-            else:
-                return await ctx.send("❌ Join a voice channel first.")
+        if not ctx.author.voice:
+            return await ctx.send("❌ You must be in a voice channel first.")
 
-        # Nice searching embed
+        if not ctx.voice_client:
+            await ctx.author.voice.channel.connect()
+
         embed = discord.Embed(
             title="<a:Royalrole:1506135213426868336> Searching the Abyss...",
             description=f"**{query}**",
@@ -77,10 +76,8 @@ class Music(commands.Cog):
         )
         msg = await ctx.send(embed=embed)
 
-        YDL_OPTIONS = {'format': 'bestaudio/best', 'noplaylist': True, 'quiet': True}
-        FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
-
         try:
+            YDL_OPTIONS = {'format': 'bestaudio/best', 'noplaylist': True, 'quiet': True}
             with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
                 info = ydl.extract_info(f"ytsearch:{query}" if not query.startswith("http") else query, download=False)
             
@@ -96,8 +93,8 @@ class Music(commands.Cog):
                 await self.play_next(ctx)
             else:
                 await msg.edit(content=f"✅ **{title}** added to queue.")
-        except:
-            await msg.edit(content="❌ Could not find that song.")
+        except Exception as e:
+            await msg.edit(content=f"❌ Could not find that song.\n`{str(e)[:100]}`")
 
     async def play_next(self, ctx):
         queue = self.get_queue(ctx.guild.id)
@@ -107,12 +104,14 @@ class Music(commands.Cog):
         url, title = queue.pop(0)
         self.now_playing[ctx.guild.id] = title
 
-        FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+        FFMPEG_OPTIONS = {
+            'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+            'options': '-vn'
+        }
         source = discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS)
 
         ctx.voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.bot.loop))
 
-        # Beautiful Now Playing embed
         embed = discord.Embed(
             title="<a:Music_Playing:1506194424592466002> Now Playing",
             description=f"**{title}**",
@@ -123,16 +122,19 @@ class Music(commands.Cog):
         view = MusicController(ctx, self)
         await ctx.send(embed=embed, view=view)
 
-    @commands.command()
-    async def queue(self, ctx):
-        q = self.get_queue(ctx.guild.id)
+    async def show_queue(self, interaction: discord.Interaction):
+        q = self.get_queue(interaction.guild_id)
         if not q:
-            return await ctx.send("**Queue is empty.**")
+            return await interaction.response.send_message("**Queue is empty.**", ephemeral=True)
         
         msg = "**Current Queue:**\n"
         for i, (_, title) in enumerate(q[:10], 1):
             msg += f"`{i}.` {title}\n"
-        await ctx.send(msg)
+        await interaction.response.send_message(msg, ephemeral=True)
+
+    @commands.command()
+    async def queue(self, ctx):
+        await self.show_queue(ctx)
 
     @commands.command()
     async def skip(self, ctx):
